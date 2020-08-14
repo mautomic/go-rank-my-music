@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 )
 
 func ImportLibrary() {
@@ -18,7 +19,6 @@ func ImportLibrary() {
 	defer file.Close()
 
 	var lines []string
-
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -29,7 +29,18 @@ func ImportLibrary() {
 		log.Fatal(err)
 	}
 
-	fmt.Print("There are ")
-	fmt.Print(len(lines))
-	fmt.Print(" lines in library xml file\n")
+	generateAlbumsAndArtists(lines)
+}
+
+func generateAlbumsAndArtists(lines []string) {
+
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if strings.Contains(line, "<key>Album</key>") {
+			albumLine := strings.Split(line, "<key>Album</key><string>")
+			albumName := strings.Split(albumLine[1], "</string>")[0]
+			fmt.Print(albumName + "\n")
+			continue
+		}
+	}
 }
