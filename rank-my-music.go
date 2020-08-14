@@ -9,6 +9,8 @@ import (
 
 func main() {
 
+	ImportLibrary()
+
 	artist := "jessie-ware"
 	album := "whats-your-pleasure"
 
