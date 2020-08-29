@@ -1,13 +1,23 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"github.com/go-redis/redis/v8"
 	"io/ioutil"
 	"net/http"
 	"strings"
 )
 
 func main() {
+
+	var ctx = context.Background()
+	rdb := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
+
+	pong, err := rdb.Ping(ctx).Result()
+	fmt.Println(pong, err)
 
 	ImportLibrary()
 
