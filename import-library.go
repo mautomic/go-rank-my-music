@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"fmt"
 	"github.com/emirpasic/gods/sets/hashset"
 	"log"
 	"os"
@@ -19,7 +18,7 @@ func newAlbum(name string, artist string) *album {
 	return &a
 }
 
-func ImportLibrary() {
+func ImportLibrary() []album {
 
 	path := "/Users/Mau/Desktop/Library.xml"
 
@@ -41,9 +40,7 @@ func ImportLibrary() {
 	}
 
 	albums := generateAlbums(lines)
-	for i := 0; i < len(albums); i++ {
-		fmt.Println(albums[i])
-	}
+	return albums
 }
 
 func generateAlbums(lines []string) []album {
