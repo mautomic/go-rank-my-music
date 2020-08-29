@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"github.com/go-redis/redis/v8"
 	"io/ioutil"
+	"log"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 )
@@ -13,60 +15,28 @@ import (
 func main() {
 
 	var ctx = context.Background()
-	rdb := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
-	})
-
-	pong, err := rdb.Ping(ctx).Result()
-	if err != nil {
-		panic(err)
-	}
-	if strings.EqualFold(pong, "PONG") {
-		fmt.Println("Connected to Redis instance")
-	}
+	redisClient := createRedisClient(ctx)
 
 	reg, err := regexp.Compile("[^-/a-zA-Z0-9]+")
-	if err != nil {
-		panic(err)
-	}
 
 	albums := ImportLibrary()
 	for i := 0; i < len(albums); i++ {
 		album := albums[i]
-		albumName := strings.TrimSpace(strings.ToLower(album.albumName))
-		albumName = strings.ReplaceAll(albumName, " ep", "")
-		albumName = strings.ReplaceAll(albumName, "deluxe", "")
-		albumName = strings.ReplaceAll(albumName, "single", "")
-		albumName = strings.ReplaceAll(albumName, "remastered", "")
-		albumName = strings.ReplaceAll(albumName, "edition", "")
-		albumName = strings.ReplaceAll(albumName, "expanded", "")
-		albumName = strings.ReplaceAll(albumName, "version", "")
-		albumName = strings.ReplaceAll(albumName, "38", "and")
-		albumName = strings.ReplaceAll(albumName, " ", "-")
-		albumName = strings.ReplaceAll(albumName, "/", "_")
-		albumName = reg.ReplaceAllString(albumName, "")
-		albumName = strings.Trim(albumName, "-")
-
-		artistName := strings.TrimSpace(strings.ToLower(album.artistName))
-		artistName = strings.ReplaceAll(artistName, " ", "-")
-		artistName = strings.ReplaceAll(artistName, "/", "_")
-		artistName = strings.ReplaceAll(artistName, "38", "and")
-		artistName = reg.ReplaceAllString(artistName, "")
-		artistName = strings.Trim(artistName, "-")
-
-		fmt.Println(albumName + " " + artistName)
+		albumName := formatAlbumName(album.albumName, reg)
+		artistName := formatArtistName(album.artistName, reg)
+		log.Print(albumName + " " + artistName)
 	}
 
 	artist := "jessie-ware"
 	album := "whats-your-pleasure"
 
 	// define url to get rating from
-	url := "https://rateyourmusic.com/release/album/" + artist + "/" + album
+	url := "https://rakeyourmusic.com/release/album/" + artist + "/" + album
 
 	// get html/js from url
 	resp, err := http.Get(url)
 	if err != nil {
-		panic(err)
+		log.Fatal("ERROR: ", err)
 	}
 	// close response body
 	defer resp.Body.Close()
@@ -74,7 +44,7 @@ func main() {
 	// read all bytes from the response body and convert to a string
 	html, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		panic(err)
+		log.Fatal("ERROR: ", err)
 	}
 	htmlString := string(html)
 
@@ -88,8 +58,50 @@ func main() {
 
 	fmt.Printf(album + " from " + artist + " has avg of " + avgRating + " from " + numRatings + " reviews")
 
-	err2 := rdb.Set(ctx, album, avgRating, 0).Err()
+	err2 := redisClient.Set(ctx, album, avgRating, 0).Err()
 	if err2 != nil {
-		panic(err2)
+		log.Fatal(err2)
 	}
+}
+
+func createRedisClient(ctx context.Context) *redis.Client {
+	redisClient := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
+	pong, err := redisClient.Ping(ctx).Result()
+	if err != nil {
+		panic(err)
+	}
+	if strings.EqualFold(pong, "PONG") {
+		log.Print("Connected to Redis instance")
+	} else {
+		log.Fatal("Cannot connect to Redis...exiting", err)
+		os.Exit(3)
+	}
+	return redisClient
+}
+
+func formatAlbumName(albumName string, regex *regexp.Regexp) string {
+	albumName = strings.TrimSpace(strings.ToLower(albumName))
+	albumName = strings.ReplaceAll(albumName, " ep", "")
+	albumName = strings.ReplaceAll(albumName, "deluxe", "")
+	albumName = strings.ReplaceAll(albumName, "single", "")
+	albumName = strings.ReplaceAll(albumName, "remastered", "")
+	albumName = strings.ReplaceAll(albumName, "edition", "")
+	albumName = strings.ReplaceAll(albumName, "expanded", "")
+	albumName = strings.ReplaceAll(albumName, "version", "")
+	albumName = strings.ReplaceAll(albumName, "38", "and")
+	albumName = strings.ReplaceAll(albumName, " ", "-")
+	albumName = strings.ReplaceAll(albumName, "/", "_")
+	albumName = regex.ReplaceAllString(albumName, "")
+	return strings.Trim(albumName, "-")
+}
+
+func formatArtistName(artistName string, regex *regexp.Regexp) string {
+	artistName = strings.TrimSpace(strings.ToLower(artistName))
+	artistName = strings.ReplaceAll(artistName, " ", "-")
+	artistName = strings.ReplaceAll(artistName, "/", "_")
+	artistName = strings.ReplaceAll(artistName, "38", "and")
+	artistName = regex.ReplaceAllString(artistName, "")
+	return strings.Trim(artistName, "-")
 }
