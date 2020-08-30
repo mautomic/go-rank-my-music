@@ -12,6 +12,8 @@ import (
 	"strings"
 )
 
+const baseUrl = "https://rateyourmusic.com/release/album/"
+
 func main() {
 
 	var ctx = context.Background()
@@ -21,17 +23,15 @@ func main() {
 
 	albums := ImportLibrary()
 	for i := 0; i < len(albums); i++ {
-		album := albums[i]
-		albumName := formatAlbumName(album.albumName, reg)
-		artistName := formatArtistName(album.artistName, reg)
-		log.Print(albumName + " " + artistName)
+		albums[i].albumName = formatAlbumName(albums[i].albumName, reg)
+		albums[i].artistName = formatArtistName(albums[i].artistName, reg)
 	}
 
-	artist := "jessie-ware"
-	album := "whats-your-pleasure"
+	album := albums[0]
 
 	// define url to get rating from
-	url := "https://rakeyourmusic.com/release/album/" + artist + "/" + album
+	url := baseUrl + album.artistName + "/" + album.albumName
+	log.Print(url)
 
 	// get html/js from url
 	resp, err := http.Get(url)
@@ -56,9 +56,10 @@ func main() {
 	numRatingsHtmlTag := strings.Split(htmlArray[1], "</span>")[0]
 	numRatings := strings.TrimSpace(strings.Split(numRatingsHtmlTag, "<span >")[1])
 
-	fmt.Printf(album + " from " + artist + " has avg of " + avgRating + " from " + numRatings + " reviews")
+	fmt.Printf(album.albumName + " from " + album.artistName +
+		" has avg of " + avgRating + " from " + numRatings + " reviews")
 
-	err2 := redisClient.Set(ctx, album, avgRating, 0).Err()
+	err2 := redisClient.Set(ctx, album.albumName, avgRating, 0).Err()
 	if err2 != nil {
 		log.Fatal(err2)
 	}
