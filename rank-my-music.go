@@ -6,20 +6,24 @@ import (
 	"github.com/go-redis/redis/v8"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net/http"
-	"os"
 	"regexp"
 	"strings"
+	"time"
 )
 
 const baseUrl = "https://rateyourmusic.com/release/album/"
+const minWait = 60
+const maxWait = 120
 
 func main() {
 
+	rand.Seed(time.Now().UnixNano())
 	var ctx = context.Background()
 	redisClient := createRedisClient(ctx)
 
-	reg, err := regexp.Compile("[^-/a-zA-Z0-9]+")
+	reg, _ := regexp.Compile("[^-/a-zA-Z0-9]+")
 
 	albums := ImportLibrary()
 	for i := 0; i < len(albums); i++ {
@@ -27,58 +31,72 @@ func main() {
 		albums[i].artistName = formatArtistName(albums[i].artistName, reg)
 	}
 
-	album := albums[0]
+	for i := 0; i < len(albums); i++ {
 
-	// define url to get rating from
-	url := baseUrl + album.artistName + "/" + album.albumName
-	log.Print(url)
+		// define url to get rating from
+		album := albums[i]
+		url := baseUrl + album.artistName + "/" + album.albumName
+		log.Print(url)
 
-	// get html/js from url
-	resp, err := http.Get(url)
-	if err != nil {
-		log.Fatal("ERROR: ", err)
+		// get html/js from url
+		resp, err := http.Get(url)
+		if err != nil {
+			log.Print("Error getting response from request", err)
+		}
+
+		// read all bytes from the response body and convert to a string
+		html, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			log.Print("Error reading response body", err)
+		}
+		htmlString := string(html)
+
+		// close response body
+		err = resp.Body.Close()
+		if err != nil {
+			log.Print("Error closing response body", err)
+		}
+
+		avgRating, numRatings := parseString(htmlString)
+
+		fmt.Printf(album.albumName + " from " + album.artistName +
+			" has avg of " + avgRating + " from " + numRatings + " reviews")
+
+		// publish key/values to redis
+		err2 := redisClient.Set(ctx, album.albumName, avgRating, 0).Err()
+		if err2 != nil {
+			log.Print("Error publishing key/value to redis", err2)
+		}
+
+		// sleep thread to not get rate limited by rateyourmusic
+		randomVal := rand.Intn(maxWait-minWait+1) + minWait
+		time.Sleep(time.Duration(randomVal) * time.Second)
 	}
-	// close response body
-	defer resp.Body.Close()
+}
 
-	// read all bytes from the response body and convert to a string
-	html, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		log.Fatal("ERROR: ", err)
-	}
-	htmlString := string(html)
+func parseString(html string) (string, string) {
 
 	// split down html to just get rating
-	htmlArray := strings.Split(htmlString, "avg_rating")
+	// TODO: catch possible runtime exception / panic
+	htmlArray := strings.Split(html, "avg_rating")
 	avgRating := strings.TrimSpace(strings.Split(htmlArray[1], "</span>")[0][3:])
 
-	htmlArray = strings.Split(htmlString, "num_ratings")
+	htmlArray = strings.Split(html, "num_ratings")
 	numRatingsHtmlTag := strings.Split(htmlArray[1], "</span>")[0]
 	numRatings := strings.TrimSpace(strings.Split(numRatingsHtmlTag, "<span >")[1])
 
-	fmt.Printf(album.albumName + " from " + album.artistName +
-		" has avg of " + avgRating + " from " + numRatings + " reviews")
-
-	err2 := redisClient.Set(ctx, album.albumName, avgRating, 0).Err()
-	if err2 != nil {
-		log.Fatal(err2)
-	}
+	return avgRating, numRatings
 }
 
 func createRedisClient(ctx context.Context) *redis.Client {
 	redisClient := redis.NewClient(&redis.Options{
 		Addr: "localhost:6379",
 	})
-	pong, err := redisClient.Ping(ctx).Result()
+	_, err := redisClient.Ping(ctx).Result()
 	if err != nil {
-		panic(err)
-	}
-	if strings.EqualFold(pong, "PONG") {
-		log.Print("Connected to Redis instance")
-	} else {
 		log.Fatal("Cannot connect to Redis...exiting", err)
-		os.Exit(3)
 	}
+	log.Print("Connected to Redis instance")
 	return redisClient
 }
 
