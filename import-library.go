@@ -13,15 +13,16 @@ type album struct {
 	artistName string
 }
 
+// creates a new album provided a name and the artist
 func newAlbum(name string, artist string) *album {
 	a := album{albumName: name, artistName: artist}
 	return &a
 }
 
+// reads the contents of the provided itunes xml file
 func ImportLibrary() []album {
 
 	path := "/Users/Mau/Desktop/Library.xml"
-
 	file, err := os.Open(path)
 	if err != nil {
 		log.Fatal(err)
@@ -34,15 +35,13 @@ func ImportLibrary() []album {
 		line := scanner.Text()
 		lines = append(lines, line)
 	}
-
 	if err := scanner.Err(); err != nil {
 		log.Fatal(err)
 	}
-
-	albums := generateAlbums(lines)
-	return albums
+	return generateAlbums(lines)
 }
 
+// generates an array of album structs from the xml lines
 func generateAlbums(lines []string) []album {
 
 	var albums []album

@@ -17,26 +17,38 @@ const baseUrl = "https://rateyourmusic.com/release/album/"
 const minWait = 60
 const maxWait = 120
 
+/*
+function that kicks off go-rank-my-music. music metadata is first imported from itunes via
+an XML file, and then formatted in order to hit rateyourmusic.com's page one album at a time.
+the average rating and number of ratings for an album are published to redis for later
+retrieval for analytics. requests to grab the html web page of rateyourmusic will occur at
+a periodic interval defined by minWait and maxWait, otherwise the IP sending these requests
+will get blocked (user must go accept a CAPTCHA on the site before getting access back).
+*/
 func main() {
 
-	rand.Seed(time.Now().UnixNano())
+	// create a redis client
 	var ctx = context.Background()
 	redisClient := createRedisClient(ctx)
 
+	// setup rand seed and regex
+	rand.Seed(time.Now().UnixNano())
 	reg, _ := regexp.Compile("[^-/a-zA-Z0-9]+")
 
 	albums := ImportLibrary()
+
 	for i := 0; i < len(albums); i++ {
+		/*
+			this piece of code will format all albums and artist names for rateyourmusic queries
+			they will typically be all lowercase, have dashes in between words, and not have special characters
+			eg. Whats Your Pleasure by Jessie Ware -> 'whats-your-pleasure' and 'jessie-ware'
+			url will look like: https://rateyourmusic.com/release/album/jessie-ware/whats-your-pleasure
+		*/
 		albums[i].albumName = formatAlbumName(albums[i].albumName, reg)
 		albums[i].artistName = formatArtistName(albums[i].artistName, reg)
-	}
 
-	for i := 0; i < len(albums); i++ {
-
-		// define url to get rating from
-		album := albums[i]
-		url := baseUrl + album.artistName + "/" + album.albumName
-		log.Print(url)
+		// create url to get rating information from
+		url := baseUrl + albums[i].artistName + "/" + albums[i].albumName
 
 		// get html/js from url
 		resp, err := http.Get(url)
@@ -51,39 +63,43 @@ func main() {
 		}
 		htmlString := string(html)
 
-		// close response body
+		// close response body first before parsing response html string
 		err = resp.Body.Close()
 		if err != nil {
 			log.Print("Error closing response body", err)
 		}
 
-		avgRating, numRatings := parseString(htmlString)
+		avgRating, numRatings := getRatingsFromResponseString(htmlString)
 
+		// if a rating was actually set, then a successful response was received AND parsed
 		if avgRating != "" {
-			fmt.Printf(album.albumName + " from " + album.artistName +
+			fmt.Printf(albums[i].albumName + " from " + albums[i].artistName +
 				" has avg of " + avgRating + " from " + numRatings + " reviews")
 
-			// publish key/values to redis
-			err2 := redisClient.Set(ctx, album.albumName, avgRating, 0).Err()
+			// publish album and rating to redis for later analysis
+			err2 := redisClient.Set(ctx, albums[i].albumName, avgRating, 0).Err()
 			if err2 != nil {
 				log.Print("Error publishing key/value to redis", err2)
 			}
 		} else {
-			log.Print("Couldn't find " + album.albumName + " by " + album.artistName + " on rateyourmusic")
+			log.Print("Couldn't find " + albums[i].albumName + " by " + albums[i].artistName + " on rateyourmusic")
 		}
 
-		// sleep thread to not get rate limited by rateyourmusic
+		// sleep thread for a random time period before continuing queries
+		// this is to avoid getting this IP blocked by rateyourmusic
 		randomVal := rand.Intn(maxWait-minWait+1) + minWait
 		time.Sleep(time.Duration(randomVal) * time.Second)
 	}
 }
 
-func parseString(html string) (string, string) {
+// gets the average rating and number of ratings from the response html string
+func getRatingsFromResponseString(html string) (string, string) {
 
-	// split down html to just get rating
 	var avgRating string
 	var numRatings string
 
+	// if avg_rating is not in the response html, then most likely the album was not found
+	// and empty strings can be returned
 	if strings.Contains(html, "avg_rating") {
 		htmlArray := strings.Split(html, "avg_rating")
 		avgRating = strings.TrimSpace(strings.Split(htmlArray[1], "</span>")[0][3:])
@@ -95,6 +111,7 @@ func parseString(html string) (string, string) {
 	return avgRating, numRatings
 }
 
+// creates a redis client for publishing data
 func createRedisClient(ctx context.Context) *redis.Client {
 	redisClient := redis.NewClient(&redis.Options{
 		Addr: "localhost:6379",
@@ -107,6 +124,7 @@ func createRedisClient(ctx context.Context) *redis.Client {
 	return redisClient
 }
 
+// formats the album name to comply with rateyourmusic's urls
 func formatAlbumName(albumName string, regex *regexp.Regexp) string {
 	albumName = strings.TrimSpace(strings.ToLower(albumName))
 	albumName = strings.ReplaceAll(albumName, " ep", "")
@@ -123,6 +141,7 @@ func formatAlbumName(albumName string, regex *regexp.Regexp) string {
 	return strings.Trim(albumName, "-")
 }
 
+// formats the artist name to comply with rateyourmusic's urls
 func formatArtistName(artistName string, regex *regexp.Regexp) string {
 	artistName = strings.TrimSpace(strings.ToLower(artistName))
 	artistName = strings.ReplaceAll(artistName, " ", "-")
