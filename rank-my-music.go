@@ -59,13 +59,17 @@ func main() {
 
 		avgRating, numRatings := parseString(htmlString)
 
-		fmt.Printf(album.albumName + " from " + album.artistName +
-			" has avg of " + avgRating + " from " + numRatings + " reviews")
+		if avgRating != "" {
+			fmt.Printf(album.albumName + " from " + album.artistName +
+				" has avg of " + avgRating + " from " + numRatings + " reviews")
 
-		// publish key/values to redis
-		err2 := redisClient.Set(ctx, album.albumName, avgRating, 0).Err()
-		if err2 != nil {
-			log.Print("Error publishing key/value to redis", err2)
+			// publish key/values to redis
+			err2 := redisClient.Set(ctx, album.albumName, avgRating, 0).Err()
+			if err2 != nil {
+				log.Print("Error publishing key/value to redis", err2)
+			}
+		} else {
+			log.Print("Couldn't find " + album.albumName + " by " + album.artistName + " on rateyourmusic")
 		}
 
 		// sleep thread to not get rate limited by rateyourmusic
@@ -77,14 +81,17 @@ func main() {
 func parseString(html string) (string, string) {
 
 	// split down html to just get rating
-	// TODO: catch possible runtime exception / panic
-	htmlArray := strings.Split(html, "avg_rating")
-	avgRating := strings.TrimSpace(strings.Split(htmlArray[1], "</span>")[0][3:])
+	var avgRating string
+	var numRatings string
 
-	htmlArray = strings.Split(html, "num_ratings")
-	numRatingsHtmlTag := strings.Split(htmlArray[1], "</span>")[0]
-	numRatings := strings.TrimSpace(strings.Split(numRatingsHtmlTag, "<span >")[1])
+	if strings.Contains(html, "avg_rating") {
+		htmlArray := strings.Split(html, "avg_rating")
+		avgRating = strings.TrimSpace(strings.Split(htmlArray[1], "</span>")[0][3:])
 
+		htmlArray = strings.Split(html, "num_ratings")
+		numRatingsHtmlTag := strings.Split(htmlArray[1], "</span>")[0]
+		numRatings = strings.TrimSpace(strings.Split(numRatingsHtmlTag, "<span >")[1])
+	}
 	return avgRating, numRatings
 }
 
