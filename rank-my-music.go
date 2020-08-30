@@ -75,11 +75,9 @@ func main() {
 		if avgRating != "" {
 			fmt.Printf(albums[i].albumName + " from " + albums[i].artistName +
 				" has avg of " + avgRating + " from " + numRatings + " reviews")
-
-			// publish album and rating to redis for later analysis
-			err2 := redisClient.Set(ctx, albums[i].albumName, avgRating, 0).Err()
-			if err2 != nil {
-				log.Print("Error publishing key/value to redis", err2)
+			err := publish(ctx, redisClient, albums[i].albumName, avgRating, numRatings)
+			if err != nil {
+				log.Print("Error publishing "+albums[i].albumName+" to redis", err)
 			}
 		} else {
 			log.Print("Couldn't find " + albums[i].albumName + " by " + albums[i].artistName + " on rateyourmusic")
@@ -122,6 +120,20 @@ func createRedisClient(ctx context.Context) *redis.Client {
 	}
 	log.Print("Connected to Redis instance")
 	return redisClient
+}
+
+// publish avgRating and numRatings to redis for later analysis
+// (key, value) = (album name, [avgRating, numRatings])
+func publish(ctx context.Context, client *redis.Client, albumName string, avgRating string, numRatings string) error {
+	err1 := client.SAdd(ctx, albumName, avgRating, 0).Err()
+	if err1 != nil {
+		return err1
+	}
+	err2 := client.SAdd(ctx, albumName, numRatings, 0).Err()
+	if err2 != nil {
+		return err2
+	}
+	return nil
 }
 
 // formats the album name to comply with rateyourmusic's urls
