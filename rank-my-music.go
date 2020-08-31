@@ -14,9 +14,13 @@ import (
 	"time"
 )
 
-const baseUrl = "https://rateyourmusic.com/release/album/"
-const minWait = 60
-const maxWait = 120
+const BASE_URL = "https://rateyourmusic.com/release/album/"
+const MIN_WAIT = 60
+const MAX_WAIT = 120
+const REDIS_ALBUM_KEY = "ALBUM:"
+const REDIS_FOUND_ALBUMS_KEY = "FOUND_ALBUMS"
+const AVG_RATING = "avg_rating"
+const NUM_RATINGS = "num_ratings"
 
 /*
 function that kicks off go-rank-my-music. music metadata is first imported from itunes via
@@ -49,7 +53,7 @@ func main() {
 		albums[i].artistName = formatArtistName(albums[i].artistName, reg)
 
 		// create url to get rating information from
-		url := baseUrl + albums[i].artistName + "/" + albums[i].albumName
+		url := BASE_URL + albums[i].artistName + "/" + albums[i].albumName
 
 		// get html/js from url
 		resp, err := http.Get(url)
@@ -93,7 +97,7 @@ func main() {
 
 		// sleep thread for a random time period before continuing queries
 		// this is to avoid getting this IP blocked by rateyourmusic
-		randomVal := rand.Intn(maxWait-minWait+1) + minWait
+		randomVal := rand.Intn(MAX_WAIT-MIN_WAIT+1) + MIN_WAIT
 		time.Sleep(time.Duration(randomVal) * time.Second)
 	}
 }
@@ -106,11 +110,11 @@ func getRatingsFromResponseString(html string) (string, string) {
 
 	// if avg_rating is not in the response html, then most likely the album was not found
 	// and empty strings can be returned
-	if strings.Contains(html, "avg_rating") {
-		htmlArray := strings.Split(html, "avg_rating")
+	if strings.Contains(html, AVG_RATING) {
+		htmlArray := strings.Split(html, AVG_RATING)
 		avgRating = strings.TrimSpace(strings.Split(htmlArray[1], "</span>")[0][3:])
 
-		htmlArray = strings.Split(html, "num_ratings")
+		htmlArray = strings.Split(html, NUM_RATINGS)
 		numRatingsHtmlTag := strings.Split(htmlArray[1], "</span>")[0]
 		numRatings = strings.TrimSpace(strings.Split(numRatingsHtmlTag, "<span >")[1])
 	}
@@ -133,11 +137,11 @@ func createRedisClient(ctx context.Context) *redis.Client {
 // publish avgRating and numRatings to redis for later analysis
 // (key, value) = (album name, [avgRating, numRatings])
 func publishRatings(ctx context.Context, client *redis.Client, albumName string, avgRating string, numRatings string) error {
-	err1 := client.SAdd(ctx, "ALBUM:"+albumName, avgRating, 0).Err()
+	err1 := client.SAdd(ctx, REDIS_ALBUM_KEY+albumName, avgRating, 0).Err()
 	if err1 != nil {
 		return err1
 	}
-	err2 := client.SAdd(ctx, "ALBUM:"+albumName, numRatings, 0).Err()
+	err2 := client.SAdd(ctx, REDIS_ALBUM_KEY+albumName, numRatings, 0).Err()
 	if err2 != nil {
 		return err2
 	}
@@ -150,7 +154,7 @@ func publishRatings(ctx context.Context, client *redis.Client, albumName string,
 // many reasons why a url may have not been found, which includes being difficult to parse,
 // or the album metadata kept by itunes is a particular edition/compilation/single
 func publishFoundAlbum(ctx context.Context, client *redis.Client, albumName string) error {
-	err1 := client.SAdd(ctx, "FOUND_ALBUMS", albumName, 0).Err()
+	err1 := client.SAdd(ctx, REDIS_FOUND_ALBUMS_KEY, albumName, 0).Err()
 	if err1 != nil {
 		return err1
 	}
