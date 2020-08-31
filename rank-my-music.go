@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -33,7 +34,7 @@ func main() {
 
 	// setup rand seed and regex
 	rand.Seed(time.Now().UnixNano())
-	reg, _ := regexp.Compile("[^-/a-zA-Z0-9]+")
+	reg, _ := regexp.Compile("[^-_/a-zA-Z0-9]+")
 
 	albums := ImportLibrary()
 
@@ -53,34 +54,41 @@ func main() {
 		// get html/js from url
 		resp, err := http.Get(url)
 		if err != nil {
-			log.Print("Error getting response from request", err)
+			log.Println("Error getting response from request", err)
 		}
 
 		// read all bytes from the response body and convert to a string
 		html, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
-			log.Print("Error reading response body", err)
+			log.Println("Error reading response body", err)
 		}
 		htmlString := string(html)
 
 		// close response body first before parsing response html string
 		err = resp.Body.Close()
 		if err != nil {
-			log.Print("Error closing response body", err)
+			log.Println("Error closing response body", err)
 		}
 
 		avgRating, numRatings := getRatingsFromResponseString(htmlString)
 
 		// if a rating was actually set, then a successful response was received AND parsed
 		if avgRating != "" {
-			fmt.Printf(albums[i].albumName + " from " + albums[i].artistName +
+			fmt.Println(albums[i].albumName + " from " + albums[i].artistName +
 				" has avg of " + avgRating + " from " + numRatings + " reviews")
-			err := publish(ctx, redisClient, albums[i].albumName, avgRating, numRatings)
+
+			// add found albums to an array (indicates successful url) and publish to redis
+			err := publishFoundAlbum(ctx, redisClient, albums[i].albumName)
 			if err != nil {
-				log.Print("Error publishing "+albums[i].albumName+" to redis", err)
+				log.Println("Error publishing "+albums[i].albumName+" to found albums set in redis", err)
+			}
+			err = publishRatings(ctx, redisClient, albums[i].albumName, avgRating, numRatings)
+			if err != nil {
+				log.Println("Error publishing "+albums[i].albumName+" ratings to redis", err)
 			}
 		} else {
-			log.Print("Couldn't find " + albums[i].albumName + " by " + albums[i].artistName + " on rateyourmusic")
+			log.Println("Couldn't find (" + strconv.Itoa(i+1) + ") " + albums[i].albumName +
+				" by " + albums[i].artistName + " on rateyourmusic")
 		}
 
 		// sleep thread for a random time period before continuing queries
@@ -118,20 +126,33 @@ func createRedisClient(ctx context.Context) *redis.Client {
 	if err != nil {
 		log.Fatal("Cannot connect to Redis...exiting", err)
 	}
-	log.Print("Connected to Redis instance")
+	log.Println("Connected to Redis instance")
 	return redisClient
 }
 
 // publish avgRating and numRatings to redis for later analysis
 // (key, value) = (album name, [avgRating, numRatings])
-func publish(ctx context.Context, client *redis.Client, albumName string, avgRating string, numRatings string) error {
-	err1 := client.SAdd(ctx, albumName, avgRating, 0).Err()
+func publishRatings(ctx context.Context, client *redis.Client, albumName string, avgRating string, numRatings string) error {
+	err1 := client.SAdd(ctx, "ALBUM:"+albumName, avgRating, 0).Err()
 	if err1 != nil {
 		return err1
 	}
-	err2 := client.SAdd(ctx, albumName, numRatings, 0).Err()
+	err2 := client.SAdd(ctx, "ALBUM:"+albumName, numRatings, 0).Err()
 	if err2 != nil {
 		return err2
+	}
+	return nil
+}
+
+// publish album name that was found on rateyourmusic to redis. this is for keeping an
+// index of albums that were successfully parsed, and can be used to avoid wasting time
+// trying to request previously not-found albums in case of a halt, or IP block. There are
+// many reasons why a url may have not been found, which includes being difficult to parse,
+// or the album metadata kept by itunes is a particular edition/compilation/single
+func publishFoundAlbum(ctx context.Context, client *redis.Client, albumName string) error {
+	err1 := client.SAdd(ctx, "FOUND_ALBUMS", albumName, 0).Err()
+	if err1 != nil {
+		return err1
 	}
 	return nil
 }
