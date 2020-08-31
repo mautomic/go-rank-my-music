@@ -18,7 +18,7 @@ const BASE_URL = "https://rateyourmusic.com/release/album/"
 const MIN_WAIT = 60
 const MAX_WAIT = 120
 const REDIS_ALBUM_KEY = "ALBUM:"
-const REDIS_FOUND_ALBUMS_KEY = "FOUND_ALBUMS"
+const REDIS_MISSING_ALBUMS_KEY = "MISSING_ALBUMS"
 const AVG_RATING = "avg_rating"
 const NUM_RATINGS = "num_ratings"
 
@@ -42,6 +42,9 @@ func main() {
 
 	albums := ImportLibrary()
 
+	// get album names that have not been found on rateyourmusic previously from redis
+	missingAlbums := redisClient.SMembers(ctx, REDIS_MISSING_ALBUMS_KEY).Val()
+
 	for i := 0; i < len(albums); i++ {
 		/*
 			this piece of code will format all albums and artist names for rateyourmusic queries
@@ -51,6 +54,11 @@ func main() {
 		*/
 		albums[i].albumName = formatAlbumName(albums[i].albumName, reg)
 		albums[i].artistName = formatArtistName(albums[i].artistName, reg)
+
+		// skip albums that we know cannot be found during album iteration
+		if contains(missingAlbums, albums[i].albumName) {
+			continue
+		}
 
 		// create url to get rating information from
 		url := BASE_URL + albums[i].artistName + "/" + albums[i].albumName
@@ -80,12 +88,6 @@ func main() {
 		if avgRating != "" {
 			fmt.Println(albums[i].albumName + " from " + albums[i].artistName +
 				" has avg of " + avgRating + " from " + numRatings + " reviews")
-
-			// add found albums to an array (indicates successful url) and publish to redis
-			err := publishFoundAlbum(ctx, redisClient, albums[i].albumName)
-			if err != nil {
-				log.Println("Error publishing "+albums[i].albumName+" to found albums set in redis", err)
-			}
 			err = publishRatings(ctx, redisClient, albums[i].albumName, avgRating, numRatings)
 			if err != nil {
 				log.Println("Error publishing "+albums[i].albumName+" ratings to redis", err)
@@ -93,6 +95,11 @@ func main() {
 		} else {
 			log.Println("Couldn't find (" + strconv.Itoa(i+1) + ") " + albums[i].albumName +
 				" by " + albums[i].artistName + " on rateyourmusic")
+			// add missing albums to an array (indicates bad url) and publish to redis
+			err := publishMissingAlbum(ctx, redisClient, albums[i].albumName)
+			if err != nil {
+				log.Println("Error publishing "+albums[i].albumName+" to missing albums set in redis", err)
+			}
 		}
 
 		// sleep thread for a random time period before continuing queries
@@ -137,24 +144,24 @@ func createRedisClient(ctx context.Context) *redis.Client {
 // publish avgRating and numRatings to redis for later analysis
 // (key, value) = (album name, [avgRating, numRatings])
 func publishRatings(ctx context.Context, client *redis.Client, albumName string, avgRating string, numRatings string) error {
-	err1 := client.SAdd(ctx, REDIS_ALBUM_KEY+albumName, avgRating, 0).Err()
+	err1 := client.SAdd(ctx, REDIS_ALBUM_KEY+albumName, avgRating).Err()
 	if err1 != nil {
 		return err1
 	}
-	err2 := client.SAdd(ctx, REDIS_ALBUM_KEY+albumName, numRatings, 0).Err()
+	err2 := client.SAdd(ctx, REDIS_ALBUM_KEY+albumName, numRatings).Err()
 	if err2 != nil {
 		return err2
 	}
 	return nil
 }
 
-// publish album name that was found on rateyourmusic to redis. this is for keeping an
-// index of albums that were successfully parsed, and can be used to avoid wasting time
+// publish album name that was not found on rateyourmusic to redis. this is for keeping an
+// index of albums that were unable to be parsed, and can be used to avoid wasting time
 // trying to request previously not-found albums in case of a halt, or IP block. There are
 // many reasons why a url may have not been found, which includes being difficult to parse,
 // or the album metadata kept by itunes is a particular edition/compilation/single
-func publishFoundAlbum(ctx context.Context, client *redis.Client, albumName string) error {
-	err1 := client.SAdd(ctx, REDIS_FOUND_ALBUMS_KEY, albumName, 0).Err()
+func publishMissingAlbum(ctx context.Context, client *redis.Client, albumName string) error {
+	err1 := client.SAdd(ctx, REDIS_MISSING_ALBUMS_KEY, albumName).Err()
 	if err1 != nil {
 		return err1
 	}
@@ -186,4 +193,14 @@ func formatArtistName(artistName string, regex *regexp.Regexp) string {
 	artistName = strings.ReplaceAll(artistName, "38", "and")
 	artistName = regex.ReplaceAllString(artistName, "")
 	return strings.Trim(artistName, "-")
+}
+
+// utility function to check if slice contains the specified string
+func contains(arr []string, element string) bool {
+	for _, item := range arr {
+		if item == element {
+			return true
+		}
+	}
+	return false
 }
