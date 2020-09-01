@@ -16,7 +16,7 @@ import (
 
 const BASE_URL = "https://rateyourmusic.com/release/album/"
 const MIN_WAIT = 60
-const MAX_WAIT = 120
+const MAX_WAIT = 90
 const REDIS_ALBUM_KEY = "ALBUM:"
 const REDIS_MISSING_ALBUMS_KEY = "MISSING_ALBUMS"
 const AVG_RATING = "avg_rating"
@@ -54,6 +54,12 @@ func main() {
 		*/
 		albums[i].albumName = formatAlbumName(albums[i].albumName, reg)
 		albums[i].artistName = formatArtistName(albums[i].artistName, reg)
+
+		// skip album if we already have data for it in redis
+		value := redisClient.SMembers(ctx, REDIS_ALBUM_KEY+albums[i].albumName).Val()
+		if len(value) > 0 {
+			continue
+		}
 
 		// skip albums that we know cannot be found during album iteration
 		if contains(missingAlbums, albums[i].albumName) {
