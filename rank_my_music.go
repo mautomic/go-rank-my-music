@@ -15,8 +15,8 @@ import (
 )
 
 const BASE_URL = "https://rateyourmusic.com/release/album/"
-const MIN_WAIT = 60
-const MAX_WAIT = 90
+const MIN_WAIT = 90
+const MAX_WAIT = 180
 const REDIS_ALBUM_KEY = "ALBUM:"
 const REDIS_MISSING_ALBUMS_KEY = "MISSING_ALBUMS"
 const AVG_RATING = "avg_rating"
