@@ -50,11 +50,19 @@ func main() {
 	// begin scraping on a different goroutine
 	go scrapeDataFromRYM(albums, ctx, redisClient, missingAlbums, reg)
 
+	// setup a webserver to retrieve album information
 	r := gin.Default()
-	r.GET("/ping", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"message": "pong",
-		})
+	r.GET("/rating/:albumName", func(c *gin.Context) {
+		albumName := c.Param("albumName")
+		albumNameRedisKey := REDIS_ALBUM_KEY + albumName
+		data := redisClient.SMembers(ctx, albumNameRedisKey).Val()
+		if len(data) < 2 {
+			c.String(http.StatusOK, "Could not find album %s in cache", albumName)
+		} else {
+			rating := data[0]
+			reviews := data[1]
+			c.String(http.StatusOK, "%s has a rating of %s with %s reviews", albumName, rating, reviews)
+		}
 	})
 	r.Run() // listen and serve on 0.0.0.0:8080
 
