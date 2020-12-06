@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
 	"io/ioutil"
 	"log"
@@ -15,8 +16,8 @@ import (
 )
 
 const BASE_URL = "https://rateyourmusic.com/release/album/"
-const MIN_WAIT = 90
-const MAX_WAIT = 180
+const MIN_WAIT = 150
+const MAX_WAIT = 380
 const REDIS_ALBUM_KEY = "ALBUM:"
 const REDIS_MISSING_ALBUMS_KEY = "MISSING_ALBUMS"
 const AVG_RATING = "avg_rating"
@@ -44,6 +45,25 @@ func main() {
 
 	// get album names that have not been found on rateyourmusic previously from redis
 	missingAlbums := redisClient.SMembers(ctx, REDIS_MISSING_ALBUMS_KEY).Val()
+	log.Println("# of albums is " + strconv.Itoa(len(albums)))
+
+	// begin scraping on a different goroutine
+	go scrapeDataFromRYM(albums, ctx, redisClient, missingAlbums, reg)
+
+	r := gin.Default()
+	r.GET("/ping", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"message": "pong",
+		})
+	})
+	r.Run() // listen and serve on 0.0.0.0:8080
+
+}
+
+// this function contains core logic to begin scraping RYM at some random interval
+// and publishes results to redis
+func scrapeDataFromRYM(albums []album, ctx context.Context, redisClient *redis.Client,
+	missingAlbums []string, reg *regexp.Regexp) {
 
 	for i := 0; i < len(albums); i++ {
 		/*
