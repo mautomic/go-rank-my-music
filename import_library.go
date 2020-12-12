@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+const libraryFile = "Library.xml"
+
 type album struct {
 	albumName  string
 	artistName string
@@ -22,8 +24,7 @@ func newAlbum(name string, artist string) *album {
 // reads the contents of the provided itunes xml file
 func ImportLibrary() []album {
 
-	path := "/Users/Mau/Desktop/Library.xml"
-	file, err := os.Open(path)
+	file, err := os.Open(libraryFile)
 	if err != nil {
 		log.Fatal(err)
 	}
